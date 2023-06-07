@@ -1,0 +1,222 @@
+<html>
+
+<head>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-GLhlTQ8iRABdZLl6O3oVMWSktQOp6b7In1Zl3/Jr59b6EGGoI1aFkw7cmDA6j6gD" crossorigin="anonymous">
+    <script src="https://cdn.ethers.io/lib/ethers-5.2.umd.min.js" type="application/javascript"></script>
+    <style>
+        body {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-flow: column;
+            margin: 0;
+            overflow: hidden;
+            font-family: "Lato", sans-serif;
+        }
+
+        .display-account {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        #input-container {
+            display: none;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            margin-top: 30px;
+        }
+
+        #spinner-container {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            margin-top: 30px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="display-account">
+        <div>
+            <h6 id="connect_message">Connect your wallet</h6>
+            <button id="connect" class="btn btn-primary">Connect</button>
+        </div>
+    </div>
+
+    <div id="input-container">
+        <div class="display-funds">
+            <h6 id="funds-message"></h6>
+        </div>
+    
+        <div class="deposit-withdraw-container">
+            <button id="deposit" class="btn btn-primary">Deposit</button>
+            <button id="withdraw" class="btn btn-primary">Withdraw</button>
+        </div>
+    </div>
+
+    <div id="spinner-container">
+        <div class="spinner-border" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+    </div>
+
+    </body>
+
+    <script>
+        const provider = ((window.ethereum != null) ? new ethers.providers.Web3Provider(window.ethereum) : ethers
+            .providers.getDefaultProvider());
+        let address = "";
+        let spinner = document.getElementById("spinner-container");
+        let connectButton = document.getElementById('connect');
+        let inputContent = document.getElementById("input-container");
+        let depositButton = document.getElementById('deposit');
+        let withdrawButton = document.getElementById('withdraw');
+        let fundsMessage = document.getElementById('funds-message');
+        let depositedFunds = 0;
+
+        connectButton.addEventListener('click', getAccounts);
+        depositButton.addEventListener('click', deposit);
+        withdrawButton.addEventListener('click', withdraw);
+
+        const contractAddress = "0xf3b52f3b1190b7129b0A7C1fD67ce51E4D0a36aF"; // sphinx "0x8FA3F23E61568bbCbc51F86534f95Fc61522203F";
+        const ABI = [
+                {
+                    "inputs": [],
+                    "name": "deposit",
+                    "outputs": [],
+                    "stateMutability": "payable",
+                    "type": "function"
+                },
+                {
+                    "inputs": [],
+                    "name": "withdraw",
+                    "outputs": [],
+                    "stateMutability": "nonpayable",
+                    "type": "function"
+                },
+                {
+                    "inputs": [
+                        {
+                            "internalType": "address",
+                            "name": "",
+                            "type": "address"
+                        }
+                    ],
+                    "name": "balanceOf",
+                    "outputs": [
+                        {
+                            "internalType": "uint256",
+                            "name": "",
+                            "type": "uint256"
+                        }
+                    ],
+                    "stateMutability": "view",
+                    "type": "function"
+	        },
+            {
+                "inputs": [
+                        {
+                            "internalType": "address",
+                            "name": "_account",
+                            "type": "address"
+                        }
+                ],
+                "name": "depositedTime",
+                "outputs": [
+                    {
+                        "internalType": "uint256",
+                        "name": "_depositTime",
+                        "type": "uint256"
+                    }
+                ],
+                "stateMutability": "view",
+                "type": "function"
+            }
+        ];
+
+        async function getAccounts() {
+            let accounts = await provider.send('eth_requestAccounts', []);
+            if (accounts.length) {
+                address = accounts[0];
+                document.getElementById('connect').remove();
+                document.getElementById('connect_message').innerHTML = `Wallet Connected: ${address}`;
+                contractInit();
+                await loadExistingFund();
+            }
+        }
+
+        function contractInit() {
+            contract = new ethers.Contract(contractAddress, ABI, provider.getSigner());
+            inputContent.style.display = "block";
+        }
+
+        async function fetchExistingDeposit() {
+            const depositTime = await contract.depositedTime(address);
+            const tokenBalance = await contract.balanceOf(address);
+            return {
+                depositTime, tokenBalance
+            };
+        }
+
+        async function loadExistingFund() {
+            loader(true);
+            const result = await fetchExistingDeposit();
+            fundsMessage.innerHTML = `Deposited Fund: ${result.depositTime != 0 ? 1:0} WEI <br/> Token Balance: ${result.tokenBalance}`;
+            loader(false);
+        }
+
+        function loader(status) {
+            if (status) {
+                spinner.style.display = "block";
+            } else {
+                spinner.style.display = "none";
+            }
+        }
+
+        async function deposit() {
+            const existingFund = await fetchExistingDeposit();
+            if(existingFund.depositTime != 0) return alert("existing deposit found!");
+            loader(true);
+            const tx = await contract.deposit({ value: 1 });
+            await waitForConfirmation(tx.hash);
+            await loadExistingFund();
+            loader(false);
+        }
+
+        async function withdraw() {
+            const existingFund = await fetchExistingDeposit();
+            if(existingFund.depositTime == 0) return alert("deposit not found!");
+            loader(true);
+            const tx = await contract.withdraw();
+            await waitForConfirmation(tx.hash);
+            await loadExistingFund();
+            loader(false);
+        }
+
+        async function waitForConfirmation(txHash) {
+            while (true) {
+                const receipt = await provider.send('eth_getTransactionReceipt', [txHash]);
+                if (receipt && receipt.blockNumber) {
+                    break;
+                }
+                // Wait for a few seconds before checking again
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+        }
+    </script>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-w76AqPfDkMBDXo30jS1Sgez6pr3x5MlQ1ZAGC+nuZB+EYdgRZgiwxhTBTkF7CXvN" crossorigin="anonymous">
+    </script>
+
+</body>
+
+</html>
